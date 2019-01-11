@@ -1,0 +1,8 @@
+{
+  "require": {
+    "alek13/slack": "^1.10",
+    "ext-curl": "*",
+    "ext-json": "*",
+    "wildbit/postmark-php": "^2.6"
+  }
+}
