@@ -8,57 +8,71 @@
 require_once './vendor/autoload.php';
 require 'helper_functions.php';
 
+$options = getopt('v::');
+
+$debug = array_key_exists('v', $options);
 
 //create an array of Ticket Issues to force an api Call in line 33f. & 40f.
-$extracted_id_Test = array(
-    array (
-        'ticket' => 6082,
-        'tester' => "fatih.doenmez@kautionsfrei.de",
-        'owner' => "fatih.doenmez@kautionsfrei.de",
-    ),
-);
+$testLimit = [
+    6061,
+    6062,
+    6149,
+];
 
-$lastRunFile = '/tmp/testerNotify.Tickets.txt';
+if ($debug && count($testLimit) > 0) {
+    echo "Testing limited to ticket #: ";
+    foreach ($testLimit as $ticket) {
+        echo $ticket . " ";
+    }
+    echo PHP_EOL;
+}
+
+$state = getLastRunTimes();
 
 // get all tickets that are "ready to test" in the entwicklung project
-$response = getJsonObjFromPlanioURL(
-    'https://kautionsfrei.plan.io/issues',
-    '2d9977f1c2578de68068616410e78a8a05fac126',
-    [
-        'status_id'  => 14,
-        'project_id' => 134
-    ]
-);
+// that have changed since the last run.
 
-//checkout if the file exists if not create
-
-$planioIssues        = getPlanioIssuesArrayFromResponse($response);
-$currentIssuesToTest = replaceUserIdsWithEmails($planioIssues);
-if (count($currentIssuesToTest) == 0) {
-    // mail no new stuff
-    return;
+$slackWork = getTicketsToProcess($state['lastRun']);
+if (sendSlackMessages($slackWork)) {
+    $state['lastRun'] = date('U');
 }
 
-$issuesForSlackNotification = $currentIssuesToTest;
-
-if (file_exists($lastRunFile)) { // file exists, pull any processed tickets out of the set from planio
-    $issuesLastRun = json_decode(file_get_contents($lastRunFile), true);
-
-    // TODO: Replace '$extracted_id_Test' with '$currentIssuesToTest' after Review
-    $issuesForSlackNotification = \Rogervila\ArrayDiffMultidimensional::compare($currentIssuesToTest, $issuesLastRun);
+// if this is the first run of the day, send an email!
+if (date('d') !== date('d', $state['lastMail'])) {
+    $emailWork = getTicketsToProcess($state['lastMail']);
+    if (sendEmailMessages($emailWork)) {
+        $state['lastMail'] = date('U');
+    }
 }
 
-// slacken
-if (count($issuesForSlackNotification) > 0) {
-    sendSlackMessages($issuesForSlackNotification);
-}
 
-// process mail
-processMail($currentIssuesToTest);
-
-// save the file for future runs.
-file_put_contents($lastRunFile, json_encode($currentIssuesToTest));
+die();
 
 
-
-
+/*****
+ * OLD STUFF
+ */
+//$planioIssues        = getPlanioIssuesArrayFromResponse($tickets);
+//$currentIssuesToTest = replaceUserIdsWithEmails($planioIssues);
+//if (count($currentIssuesToTest) == 0) {
+//    // mail no new stuff
+//    return;
+//}
+//
+//$issuesForSlackNotification = $currentIssuesToTest;
+//
+//
+//// slacken
+//if (count($issuesForSlackNotification) > 0) {
+//    sendSlackMessages($issuesForSlackNotification);
+//}
+//
+//// process mail
+//processMail($currentIssuesToTest);
+//
+//// save the file for future runs.
+//file_put_contents($lastRunFile, json_encode($currentIssuesToTest));
+//
+//
+//
+//

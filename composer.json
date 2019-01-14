@@ -3,6 +3,7 @@
     "alek13/slack": "^1.10",
     "ext-curl": "*",
     "ext-json": "*",
+    "guzzlehttp/guzzle": "~6.0",
     "wildbit/postmark-php": "^2.6"
   }
 }

@@ -2,51 +2,125 @@
 
 use Postmark\PostmarkClient;
 
+
 /**
- * @param      $url
- * @param      $key
- * @param null $filter
+ * @param $lastRun
  *
  * @return mixed
  */
-function getJsonObjFromPlanioURL($url, $key, $filter = null)
+function getTickets($lastRun)
 {
-    $serviceUrl = $url;
-    $apiKey = $key;
-    $headers = array(
-        'Content-Type: application/json',
-        'X-Redmine-API-Key: '. $apiKey
-    );
+    global $debug;
 
-    $params = '';
-    if (isset($filter)) {
-        foreach ($filter as $key => $value) {
-            $params .= $key. '=' .$value. '&';
+    $serviceUrl  = 'https://kautionsfrei.plan.io/issues.json';
+    $timeFilter  = '';
+    $queryParams = [
+        'status_id'  => 14,
+        'project_id' => 134,
+    ];
+    if ($lastRun) {
+        // updated_on=%3E%3D2014-01-02T08:12:32Z
+        $timeFilter                = '%3E%3D' . date('Y-m-d', $lastRun) .
+                                     'T' . date('h:i:s', $lastRun) . 'Z';
+        $queryParams['updated_on'] = $timeFilter;
+        if ($debug) {
+            echo "Limiting query to " . $timeFilter;
         }
-        $params = trim($params, '&');
+    }
+    $apiKey  = '2d9977f1c2578de68068616410e78a8a05fac126';
+    $headers = [
+        'Content-Type'      => 'application/json',
+        'X-Redmine-API-Key' => $apiKey,
+    ];
+
+    $client = new GuzzleHttp\Client();
+
+    try {
+        $res        = $client->request(
+            'GET',
+            $serviceUrl,
+            [
+                'headers' => $headers,
+                'query'   => $queryParams,
+            ]
+        );
+        $ticketList = json_decode($res->getBody());
+    } catch (\GuzzleHttp\Exception\GuzzleException $e) {
+        die ($e->getMessage());
     }
 
-    $rest = curl_init($serviceUrl);
-
-    curl_setopt_array($rest, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_HEADER => 0,
-        CURLOPT_URL => $serviceUrl.'.json?'.$params,
-        CURLOPT_HTTPHEADER => $headers
-    ]);
-
-
-    //execute the session
-    $curlResponse = curl_exec($rest);
-
-
-    //finish off the session
-    curl_close($rest);
-    return json_decode($curlResponse, true);
+    return $ticketList;
 }
 
+function getLastRunTimes()
+{
+    $lastRunFile = '/tmp/testerNotify.Tickets.txt';
+//checkout if the file exists if not create
+    if (file_exists($lastRunFile)) { // file exists, pull any processed tickets out of the set from planio
+        $state = json_decode(file_get_contents($lastRunFile), true);
+    } else {
+        $state = [
+            'lastRun'  => null,
+            'lastMail' => null,
+        ];
+        file_put_contents($lastRunFile, json_encode($state));
+    }
+
+    return $state;
+}
+
+/**
+ * @param array $state
+ *
+ * @return array
+ */
+function getTicketsToProcess(array $state): array
+{
+    global $debug;
+    $ticketsToProcess = getTickets($state['lastRun']);
+
+    $noTester        = [];
+    $testAssignment  = [];
+    $ticketsToNotify = [
+        'noTest' => $noTester,
+        'assign' => $testAssignment,
+    ];
+
+    foreach ($ticketsToProcess as $ticket) {
+        $tester = $ticket->custom_fields[1]->value ?? '';
+        // if tester is blank ....
+        if ($tester !== '') {
+            if ($debug) {
+                echo 'noTester ' . $ticket->id;
+            }
+            $ticketsToNotify['noTest'][] = [
+                'assigned_to' => $ticket->assigned_to->name,
+                'id'          => $ticket->id,
+                'subject'     => $ticket->subject,
+            ];
+        } else {
+            if ($debug) {
+                echo 'testAssign: ' . $ticket->id;
+            }
+            $ticketsToNotify['assign'][] = [
+                'tester'      => $tester,
+                'assigned_to' => $ticket->assigned_to->name,
+                'id'          => $ticket->id,
+                'subject'     => $ticket->subject,
+
+            ];
+            //send a slack message to the tester and let them know
+        }
+
+    }
+
+    return $ticketsToNotify;
+}
+
+
+/**********************************************************
+ * old stuff
+ */
 
 /**
  * @param $response
@@ -61,13 +135,12 @@ function getPlanioIssuesArrayFromResponse($response)
             'ticket'      => $issue['id'],
             'tester'      => $issue['custom_fields'][1]['value'] ?? '',
             'assigned_to' => $issue['assigned_to']['id'] ?? '',
-            'author'      => $issue['author']['id']
+            'author'      => $issue['author']['id'],
         ];
     }
 
     return $issuesArray;
 }
-
 
 
 //taking the email adress of the user itself, because email adress between slack and planio are matching.
@@ -87,11 +160,11 @@ function replaceUserIdsWithEmails($issues)
             if ($key !== 'ticket') {
                 $email = $knownIds[$value] ?? null;
                 if (!$email && $value) {
-                    $response = getJsonObjFromPlanioURL(
+                    $response         = getTickets(
                         'https://kautionsfrei.plan.io/users/' . $value,
                         '2d9977f1c2578de68068616410e78a8a05fac126'
                     );
-                    $email = $response['user']['mail'];
+                    $email            = $response['user']['mail'];
                     $knownIds[$value] = $email;
                 }
 
@@ -114,14 +187,14 @@ function replaceUserIdsWithEmails($issues)
 function getSlackUsers($url, $token, $filter = null)
 {
     $serviceUrl = $url;
-    $headers = array(
-        'Content-Type: application/x-www-form-urlencoded'
-    );
+    $headers    = [
+        'Content-Type: application/x-www-form-urlencoded',
+    ];
 
     $params = '';
     if (isset($filter)) {
         foreach ($filter as $key => $value) {
-            $params .= $key. '=' .$value. '&';
+            $params .= $key . '=' . $value . '&';
         }
         $params = trim($params, '&');
     }
@@ -132,9 +205,9 @@ function getSlackUsers($url, $token, $filter = null)
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_HEADER => 0,
-        CURLOPT_URL => $serviceUrl.'?token='.$token.$params,
-        CURLOPT_HTTPHEADER => $headers
+        CURLOPT_HEADER         => 0,
+        CURLOPT_URL            => $serviceUrl . '?token=' . $token . $params,
+        CURLOPT_HTTPHEADER     => $headers,
     ]);
 
 
@@ -144,6 +217,7 @@ function getSlackUsers($url, $token, $filter = null)
 
     //finish off the session
     curl_close($rest);
+
     return json_decode($curlResponse, true);
 }
 
@@ -193,8 +267,8 @@ function sendSlackMessages($issuesForNotification)
 
         if ($slackId) {
             $client
-                -> to('@'. $slackId)
-                -> send($msgToSend . ': <@'. $slackId . '>');
+                ->to('@' . $slackId)
+                ->send($msgToSend . ': <@' . $slackId . '>');
         }
     }
 }
@@ -210,7 +284,7 @@ function setupSlack()
     $settings = [
         'channel'      => '#testernotify',
         'link_names'   => true,
-        'unfurl_links' => true
+        'unfurl_links' => true,
     ];
 
     $client = new Maknz\Slack\Client($url, $settings);
@@ -243,7 +317,7 @@ function getAllCategories($array)
  */
 function getAllInvolvedMails($issues)
 {
-    $matchedKeys=[];
+    $matchedKeys = [];
     foreach ($issues as $issue) {
         unset($issue['ticket']);
         $matchedKeys = array_merge($matchedKeys, array_values($issue));
@@ -254,7 +328,7 @@ function getAllInvolvedMails($issues)
 
 
 const MAPPING = [
-    'attachment_details_tester' => 'tester'
+    'attachment_details_tester' => 'tester',
 ];
 
 /**
@@ -264,7 +338,6 @@ function sendEmailMessages($newIdsSinceLastRun)
 {
 
 
-
     $client = new PostmarkClient("4289d43f-4297-4805-bd96-64f0f0f8383e");
 
     // TODO: activate $value_tester_email after Review
@@ -272,11 +345,11 @@ function sendEmailMessages($newIdsSinceLastRun)
 
     //TODO: Email verschicken, Liste nach email Adressen suchen nicht nach Ticket
     //recreate the given array and sort them by tester, owner etc. to prevent sending multiple mails
-    $categories = getAllCategories($newIdsSinceLastRun[0]);
+    $categories    = getAllCategories($newIdsSinceLastRun[0]);
     $involedEmails = getAllInvolvedMails($newIdsSinceLastRun);
 
 
-    $mailCategory=[];
+    $mailCategory = [];
     foreach ($involedEmails as $mail) {
         foreach ($categories as $category) {
             $mailCategory[$mail][$category] = array_keys(
@@ -292,13 +365,12 @@ function sendEmailMessages($newIdsSinceLastRun)
         }
 
         $mailBody = [
-            "subject_name"                   => "Every Ticket you are involved in, which is in 'Ready to Test' state",
-            "body_tester"                    => "The Tickets you have to test",
-            "body_author"                    => "The Tickets you created and are in the 'Ready to Test' state",
-            "body_assigned_to"               => "The Tickets you worked on and put in the 'Ready to Test' state",
-            "commenter_name"                 => "commenter_name_Value",
+            "subject_name"     => "Every Ticket you are involved in, which is in 'Ready to Test' state",
+            "body_tester"      => "The Tickets you have to test",
+            "body_author"      => "The Tickets you created and are in the 'Ready to Test' state",
+            "body_assigned_to" => "The Tickets you worked on and put in the 'Ready to Test' state",
+            "commenter_name"   => "commenter_name_Value",
         ];
-
 
 
         foreach ($body as $categoryName => $issueIds) {
@@ -326,7 +398,7 @@ function getMailAttachmentById($issueId)
 {
     return [
         "attachment_url"  => "https://kautionsfrei.plan.io/issues/" . $issueId,
-        "attachment_name" => "https://kautionsfrei.plan.io/issues/" . $issueId
+        "attachment_name" => "https://kautionsfrei.plan.io/issues/" . $issueId,
     ];
 }
 
@@ -343,13 +415,13 @@ function getMailAttachmentById($issueId)
 function processMail($newIdsSinceLastRun)
 {
 
-    $timestamp = time();
-    $date = date("Y-m-d H:i:s", $timestamp);
+    $timestamp   = time();
+    $date        = date("Y-m-d H:i:s", $timestamp);
     $lastRunFile = '/tmp/testerNotify.CheckDateToSendNightlyMails.txt';
 
     $datetime = explode(" ", $date);
-    $dateNow = $datetime[0];
-    $timeNow = $datetime[1];
+    $dateNow  = $datetime[0];
+    $timeNow  = $datetime[1];
 
 
     if (file_exists($lastRunFile)) {
@@ -357,7 +429,7 @@ function processMail($newIdsSinceLastRun)
         if (strtotime($dateNow) > strtotime($getDateTimeLastRun)) {
             sendEmailMessages($newIdsSinceLastRun);
         }
-    } elseif (strtotime($timeNow)<= "01:00:00") {
+    } elseif (strtotime($timeNow) <= "01:00:00") {
         sendEmailMessages($newIdsSinceLastRun);
     }
 
