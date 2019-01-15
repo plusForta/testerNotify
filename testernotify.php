@@ -12,23 +12,11 @@ require 'helper_functions.php';
 $dotenv = Dotenv\Dotenv::create(__DIR__);
 $dotenv->load();
 
-$options = getopt('v::');
+$options = getopt('v::n::');
 
 $debug = array_key_exists('v', $options);
 
-$testLimit = [
-    6061,
-    6062,
-    6149,
-];
-
-if ($debug && count($testLimit) > 0) {
-    echo "Testing limited to ticket #: ";
-    foreach ($testLimit as $ticket) {
-        echo $ticket . " ";
-    }
-    echo PHP_EOL;
-}
+$nosave = array_key_exists('n', $options);
 
 $state = getState();
 if (array_key_exists('lookup', $state) && count($state['lookup']) > 0) {
@@ -49,7 +37,7 @@ if ($debug) {
     echo "Sending slack messages" . PHP_EOL;
 }
 sendSlackMessages($work);
-$state['lastRun'] = date('U');
+$state['lastRun'] = time();
 
 // if this is the first run of the day, do it again, but for emails.
 if (date('d') !== date('d', $state['lastMail'])) {
@@ -64,16 +52,18 @@ if (date('d') !== date('d', $state['lastMail'])) {
     }
     sendEmailMessages($fullDay);
 
-    $state['lastMail'] = date('U');
+    $state['lastMail'] = time();
     // regen the user lookup table
     if ($debug) {
-        echo "Regenerate the lookup table.";
+        echo "Regenerate the lookup table." . PHP_EOL;
     }
     $state['lookup'] = buildUserLookupTable();
 
 }
 
-if ($debug) {
-    echo "Saving state.." . PHP_EOL;
+if (!$nosave) {
+    if ($debug) {
+        echo "Saving state... " . PHP_EOL;
+    }
+    file_put_contents(getenv('RUNFILE'), json_encode($state));
 }
-file_put_contents(getenv('RUNFILE'), json_encode($state));

@@ -15,7 +15,7 @@ function getTickets(int $lastRun)
 {
     global $debug;
 
-    $serviceUrl  = 'https://kautionsfrei.plan.io/issues.json';
+    $serviceUrl  = getenv('PLANIO_URL') . '/issues.json';
     $timeFilter  = '';
     $queryParams = [
         'status_id' => 14,
@@ -23,7 +23,7 @@ function getTickets(int $lastRun)
     ];
     if ($lastRun) {
         $timeFilter                = '>=' . date('Y-m-d', $lastRun) .
-                                     'T' . date('h:i:s', $lastRun) . 'Z';
+                                     'T' . date('H:i:s', $lastRun) . 'Z';
         $queryParams['updated_on'] = $timeFilter;
         if ($debug) {
             echo "Limiting query to " . $timeFilter . PHP_EOL;
@@ -31,7 +31,7 @@ function getTickets(int $lastRun)
     }
     $headers = [
         'Content-Type'      => 'application/json',
-        'X-Redmine-API-Key' => getenv('API_KEY'),
+        'X-Redmine-API-Key' => getenv('PLANIO_API_KEY'),
     ];
 
     $client = new GuzzleHttp\Client();
@@ -143,10 +143,10 @@ function buildUserLookupTable()
  */
 function getPlanIoUsers()
 {
-    $serviceUrl = 'https://kautionsfrei.plan.io/users.json';
+    $serviceUrl = getenv('PLANIO_URL') . '/users.json';
     $headers    = [
         'Content-Type'      => 'application/json',
-        'X-Redmine-API-Key' => getenv('API_KEY'),
+        'X-Redmine-API-Key' => getenv('PLANIO_API_KEY'),
     ];
 
     $client = new GuzzleHttp\Client();
@@ -232,6 +232,10 @@ function getTicketsToProcess(int $timeLimit, array $lookup): array
                 'subject'          => $ticket->subject,
             ];
         }
+        if ($debug) {
+            var_dump($ticket);
+            echo PHP_EOL;
+        }
     }
 
     // return the array (with two sub arrays)
@@ -249,7 +253,7 @@ function sendSlackMessages($work)
     $client   = new Maknz\Slack\Client(getenv('SLACK_WEBHOOK'), $settings);
 
     foreach ($work['noTest'] as $noTest) {
-        $url  = 'https://kautionsfrei.plan.io/issues/' . $noTest['id'];
+        $url  = getenv('PLANIO_URL') . '/issues/' . $noTest['id'];
         $msg  = 'Ticket #' . $noTest['id'] . ' ist bereit zu testen, hat aber keinen zugeordneten Tester.';
         $user = '@' . $noTest['assigned_to_data']['slackName'];
         if (!$debug) {
@@ -262,7 +266,7 @@ function sendSlackMessages($work)
     }
 
     foreach ($work['assign'] as $assign) {
-        $url  = 'https://kautionsfrei.plan.io/issues/' . $noTest['id'];
+        $url  = getenv('PLANIO_URL') . '/issues/' . $assign['id'];
         $msg  = 'Ticket #' . $assign['id'] . ' ist bereit zum Testen und du bist der zugewiesene Tester!';
         $user = '@' . $assign['tester_data']['slackName'];
         if (!$debug) {
@@ -276,18 +280,76 @@ function sendSlackMessages($work)
 
 function sendEmailMessages($work)
 {
+    global $debug;
+
     $client = new \Postmark\PostmarkClient(getenv('PM_SERVER_ID'));
 
     // make new arrays for each email address.
 
-    $email = [];
+    $emails = [];
 
-    foreach($work['noTest'] as $noTest) {
-        $email[$noTest['assign_to_data']['mail']]['noTest'] = $noTest;
+    foreach ($work['noTest'] as $noTest) {
+        $emails[$noTest['assigned_to_data']['mail']]['noTest'][] = $noTest;
     }
 
-    foreach($work['assign'] as $assign) {
-        $email[$assign['tester_data']['mail']]['assign'] = $noTest;
+    foreach ($work['assign'] as $assign) {
+        $emails[$assign['tester_data']['mail']]['assign'][] = $assign;
+    }
+
+
+    foreach ($emails as $email) {
+
+        // if there are not tickets for a particular category, make an
+        // empty array element.
+        if (!array_key_exists('noTest', $email)) {
+            $email['noTest'] = [];
+        }
+        if (!array_key_exists('assign', $email)) {
+            $email['assign'] = [];
+        }
+
+        $templateData = [
+            "subject_name"       => "Daily Testing Nag Email",
+            "notest_header"      => '',
+            "ticket_list_notest" => [],
+            "assign_header"      => "",
+            "ticket_list_assign" => [],
+            "signature"          => "The Test Notifier",
+        ];
+
+        $to = null;
+
+        foreach ($email['noTest'] as $ticket) {
+            $to                                   = $ticket['assigned_to_name'] . ' <' .
+                                                    $ticket['assigned_to_data']['mail'] . '>';
+            $templateData['notest_header']        = 'Tickets that have no tester assigned!';
+            $templateData['ticket_list_notest'][] = [
+                'url'  => getenv('PLANIO_URL') . '/issues/' . $ticket['id'],
+                'name' => '#' . $ticket['id'] . ': ' . $ticket['subject'],
+            ];
+        }
+
+        foreach ($email['assign'] as $ticket) {
+            $to                                   = $ticket['tester_data']['firstname'] . ' ' .
+                                                    $ticket['tester_data']['lastname'] . ' <' .
+                                                    $ticket['tester_data']['mail'] . '>';
+            $templateData['assign_header']        = 'Tickets that are assigned to you for testing';
+            $templateData['ticket_list_assign'][] = [
+                'url'  => getenv('PLANIO_URL') . '/issues/' . $ticket['id'],
+                'name' => '#' . $ticket['id'] . ': ' . $ticket['subject'],
+            ];
+        }
+        if (!$debug) {
+            $sendResult = $client->sendEmailWithTemplate(
+                "testNotify@plusforta.de",
+                $to,
+                9276967,
+                $templateData
+            );
+        } else {
+            echo "Would have sent an email to ${to}" . PHP_EOL;
+            var_dump($templateData);
+        }
     }
 }
 
