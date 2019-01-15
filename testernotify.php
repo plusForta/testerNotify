@@ -9,14 +9,14 @@ require_once './vendor/autoload.php';
 require 'helper_functions.php';
 
 // load environment variables.
-$dotenv = Dotenv\Dotenv::create(__DIR__);
-$dotenv->load();
+$dotEnv = Dotenv\Dotenv::create(__DIR__);
+$dotEnv->load();
 
 $options = getopt('v::n::');
 
 $debug = array_key_exists('v', $options);
 
-$nosave = array_key_exists('n', $options);
+$noSave = array_key_exists('n', $options);
 
 $state = getState();
 if (array_key_exists('lookup', $state) && count($state['lookup']) > 0) {
@@ -25,7 +25,6 @@ if (array_key_exists('lookup', $state) && count($state['lookup']) > 0) {
     $lookup = buildUserLookupTable();
 }
 
-
 // get all tickets that are "ready to test" in the Entwicklung project
 // that have changed since the last run.
 if ($debug) {
@@ -33,10 +32,14 @@ if ($debug) {
 }
 $work = getTicketsToProcess(intval($state['lastRun']), $lookup);
 
-if ($debug) {
+if ($debug && count($work) > 0) {
     echo "Sending slack messages" . PHP_EOL;
+} elseif ($debug) {
+    echo "No tickets selected." . PHP_EOL;
 }
 sendSlackMessages($work);
+
+// update the lastRun for the slack messages
 $state['lastRun'] = time();
 
 // if this is the first run of the day, do it again, but for emails.
@@ -52,16 +55,17 @@ if (date('d') !== date('d', $state['lastMail'])) {
     }
     sendEmailMessages($fullDay);
 
+    // update the state since we sent the mail
     $state['lastMail'] = time();
-    // regen the user lookup table
+
+    // regen the user lookup table once a day
     if ($debug) {
         echo "Regenerate the lookup table." . PHP_EOL;
     }
     $state['lookup'] = buildUserLookupTable();
-
 }
 
-if (!$nosave) {
+if (!$noSave) {
     if ($debug) {
         echo "Saving state... " . PHP_EOL;
     }

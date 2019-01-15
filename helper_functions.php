@@ -1,10 +1,7 @@
 <?php
-
-
 /**
  * Gets all tickets from Planio that are:
  *   * in ready to test status
- *   * are in the entwicklung project
  *   * have changed since $lastRun
  *
  * @param int $lastRun the time (in unixtime) since the last run
@@ -19,7 +16,6 @@ function getTickets(int $lastRun)
     $timeFilter  = '';
     $queryParams = [
         'status_id' => 14,
-//        'project_id' => 134,
     ];
     if ($lastRun) {
         $timeFilter                = '>=' . date('Y-m-d', $lastRun) .
@@ -137,11 +133,11 @@ function buildUserLookupTable()
 }
 
 /**
- * @param int $lastRun
+ * Get all the plan.io users
  *
- * @return mixed
+ * @return array
  */
-function getPlanIoUsers()
+function getPlanIoUsers(): array
 {
     $serviceUrl = getenv('PLANIO_URL') . '/users.json';
     $headers    = [
@@ -167,7 +163,16 @@ function getPlanIoUsers()
     return $userList;
 }
 
-function getState()
+/**
+ * Load state from the temp file.
+ *
+ * This includes the last time we successfully ran and a cached list of all
+ * the plan.io users -> slack users map.
+ *
+ * @return array
+ */
+
+function getState(): array
 {
     $lastRunFile = getenv('RUNFILE');
     //checkout if the file exists if not create
@@ -185,7 +190,8 @@ function getState()
 }
 
 /**
- * @param array $timeLimit
+ * @param int $timeLimit a unix timestamp which limits how far back we go to get tickets
+ * @param array $lookup the plan.io -> slack lookup table for users
  *
  * @return array
  */
@@ -242,7 +248,15 @@ function getTicketsToProcess(int $timeLimit, array $lookup): array
     return $ticketsToNotify;
 }
 
-function sendSlackMessages($work)
+/**
+ * Sends slack messages for the passed set of tickets
+ *
+ * work[noTest|assign][..tickets..]
+ *
+ * @param array $work A multi-dim array with work split into two categories
+ */
+
+function sendSlackMessages(array $work): void
 {
     global $debug;
 
@@ -261,8 +275,6 @@ function sendSlackMessages($work)
         } else {
             echo 'send: ' . $user . ': ' . $msg . ' ' . $url . PHP_EOL;
         }
-
-
     }
 
     foreach ($work['assign'] as $assign) {
@@ -278,7 +290,13 @@ function sendSlackMessages($work)
 
 }
 
-function sendEmailMessages($work)
+/**
+ * Similar to sendSlackMessages, except sends emails via postmark.
+ *
+ * @param array $work
+ */
+
+function sendEmailMessages(array $work): void
 {
     global $debug;
 
@@ -352,81 +370,3 @@ function sendEmailMessages($work)
         }
     }
 }
-
-//
-//    foreach ($mailCategory as $email => $body) {
-//        if (empty($email)) {
-//            continue;
-//        }
-//
-//        $mailBody = [
-//            "subject_name"     => "Every Ticket you are involved in, which is in 'Ready to Test' state",
-//            "body_tester"      => "The Tickets you have to test",
-//            "body_author"      => "The Tickets you created and are in the 'Ready to Test' state",
-//            "body_assigned_to" => "The Tickets you worked on and put in the 'Ready to Test' state",
-//            "commenter_name"   => "commenter_name_Value",
-//        ];
-//
-//
-//        foreach ($body as $categoryName => $issueIds) {
-//            foreach ($issueIds as $issueId) {
-//                $attachmentCategory              = 'attachment_details_' . $categoryName;
-//                $mailBody[$attachmentCategory][] = getMailAttachmentById($issueId);
-//            }
-//        }
-//
-//        $client->sendEmailWithTemplate(
-//            "robot@kautionsfrei.de",
-//            $email,
-//            9276967,
-//            $mailBody
-//        );
-//    }
-//}
-//
-///**
-// * @param $issueId
-// *
-// * @return array
-// */
-//function getMailAttachmentById($issueId)
-//{
-//    return [
-//        "attachment_url"  => "https://kautionsfrei.plan.io/issues/" . $issueId,
-//        "attachment_name" => "https://kautionsfrei.plan.io/issues/" . $issueId,
-//    ];
-//}
-//
-///**
-// * @param $issueId
-// *
-// * @return string
-// */
-//
-//
-///**
-// * @param $newIdsSinceLastRun
-// */
-//function processMail($newIdsSinceLastRun)
-//{
-//
-//    $timestamp   = time();
-//    $date        = date("Y-m-d H:i:s", $timestamp);
-//    $lastRunFile = '/tmp/testerNotify.CheckDateToSendNightlyMails.txt';
-//
-//    $datetime = explode(" ", $date);
-//    $dateNow  = $datetime[0];
-//    $timeNow  = $datetime[1];
-//
-//
-//    if (file_exists($lastRunFile)) {
-//        $getDateTimeLastRun = file_get_contents($lastRunFile);
-//        if (strtotime($dateNow) > strtotime($getDateTimeLastRun)) {
-//            sendEmailMessages($newIdsSinceLastRun);
-//        }
-//    } elseif (strtotime($timeNow) <= "01:00:00") {
-//        sendEmailMessages($newIdsSinceLastRun);
-//    }
-//
-//    file_put_contents($lastRunFile, $date);
-//}
