@@ -8,11 +8,14 @@
 require_once './vendor/autoload.php';
 require 'helper_functions.php';
 
+// load environment variables.
+$dotenv = Dotenv\Dotenv::create(__DIR__);
+$dotenv->load();
+
 $options = getopt('v::');
 
 $debug = array_key_exists('v', $options);
 
-//create an array of Ticket Issues to force an api Call in line 33f. & 40f.
 $testLimit = [
     6061,
     6062,
@@ -27,52 +30,50 @@ if ($debug && count($testLimit) > 0) {
     echo PHP_EOL;
 }
 
-$state = getLastRunTimes();
+$state = getState();
+if (array_key_exists('lookup', $state) && count($state['lookup']) > 0) {
+    $lookup = $state['lookup'];
+} else {
+    $lookup = buildUserLookupTable();
+}
 
-// get all tickets that are "ready to test" in the entwicklung project
+
+// get all tickets that are "ready to test" in the Entwicklung project
 // that have changed since the last run.
-
-$slackWork = getTicketsToProcess($state['lastRun']);
-if (sendSlackMessages($slackWork)) {
-    $state['lastRun'] = date('U');
+if ($debug) {
+    echo "Processing tickets for slack..." . PHP_EOL;
 }
+$work = getTicketsToProcess(intval($state['lastRun']), $lookup);
 
-// if this is the first run of the day, send an email!
+if ($debug) {
+    echo "Sending slack messages" . PHP_EOL;
+}
+sendSlackMessages($work);
+$state['lastRun'] = date('U');
+
+// if this is the first run of the day, do it again, but for emails.
 if (date('d') !== date('d', $state['lastMail'])) {
-    $emailWork = getTicketsToProcess($state['lastMail']);
-    if (sendEmailMessages($emailWork)) {
-        $state['lastMail'] = date('U');
+
+    if ($debug) {
+        echo "Processing tickets for postmark..." . PHP_EOL;
     }
+    $fullDay = getTicketsToProcess(intval($state['lastMail']), $lookup);
+
+    if ($debug) {
+        echo "Sending Email messages" . PHP_EOL;
+    }
+    sendEmailMessages($fullDay);
+
+    $state['lastMail'] = date('U');
+    // regen the user lookup table
+    if ($debug) {
+        echo "Regenerate the lookup table.";
+    }
+    $state['lookup'] = buildUserLookupTable();
+
 }
 
-
-die();
-
-
-/*****
- * OLD STUFF
- */
-//$planioIssues        = getPlanioIssuesArrayFromResponse($tickets);
-//$currentIssuesToTest = replaceUserIdsWithEmails($planioIssues);
-//if (count($currentIssuesToTest) == 0) {
-//    // mail no new stuff
-//    return;
-//}
-//
-//$issuesForSlackNotification = $currentIssuesToTest;
-//
-//
-//// slacken
-//if (count($issuesForSlackNotification) > 0) {
-//    sendSlackMessages($issuesForSlackNotification);
-//}
-//
-//// process mail
-//processMail($currentIssuesToTest);
-//
-//// save the file for future runs.
-//file_put_contents($lastRunFile, json_encode($currentIssuesToTest));
-//
-//
-//
-//
+if ($debug) {
+    echo "Saving state.." . PHP_EOL;
+}
+file_put_contents(getenv('RUNFILE'), json_encode($state));
