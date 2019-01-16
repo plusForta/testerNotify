@@ -18,8 +18,11 @@ function getTickets(int $lastRun)
         'status_id' => 14,
     ];
     if ($lastRun) {
-        $timeFilter                = '>=' . date('Y-m-d', $lastRun) .
-                                     'T' . date('H:i:s', $lastRun) . 'Z';
+        $timeFilter = '>=' . gmdate(
+                "Y-m-d\TH:i:s\Z",
+                $lastRun - 3600 // adjust time by 1 hour for zulu
+            );
+
         $queryParams['updated_on'] = $timeFilter;
         if ($debug) {
             echo "Limiting query to " . $timeFilter . PHP_EOL;
