@@ -17,7 +17,7 @@ We use the following APIs:
 
 The PHP version is 7.2
 
-## installing
+## Installing
 
 check out the repo.
 
@@ -25,4 +25,15 @@ check out the repo.
 1. ```cp env.example .env```
 1. edit the .env file with your credentials
 1. set up a cron to run the script as often as you like
+
+## Running the script
+
+```php testernotify.php```
+
+There are no required parameters, but you can optionally give:
+
+| option | result |
+| --- | --- |
+| -v | Runs in verbose mode, doesn't actually send messages |
+| -n | Doesn't save state at the end of the run, so you can run the command multiple times |
 
