@@ -138,9 +138,9 @@ function buildUserLookupTable()
 /**
  * Get all the plan.io users
  *
- * @return array
+ * @return stdClass
  */
-function getPlanIoUsers(): array
+function getPlanIoUsers(): stdClass
 {
     $serviceUrl = getenv('PLANIO_URL') . '/users.json';
     $headers    = [
